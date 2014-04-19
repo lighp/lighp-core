@@ -1,0 +1,10 @@
+[
+	{
+		"url":"/admin/logout/?",
+		"action":"logout"
+	},
+	{
+		"url":"/admin/login/update/?",
+		"action":"update"
+	}
+]
