@@ -3,6 +3,7 @@
 namespace core\responses;
 
 use core\fs\CacheDirectory;
+use core\fs\Pathfinder;
 use core\Config;
 use core\submodules\ModuleTranslation;
 use \Mustache_Engine;
@@ -49,6 +50,18 @@ class Page extends ResponseContent {
 	}
 
 	/**
+	 * Get one of this page's variables.
+	 * @param string|int $name  The variable's name.
+	 */
+	public function getVar($name) {
+		if (!isset($this->vars[$name])) {
+			return null;
+		}
+
+		return $this->vars[$name];
+	}
+
+	/**
 	 * Get global variables.
 	 * @return array
 	 */
@@ -73,7 +86,10 @@ class Page extends ResponseContent {
 			return array();
 		}
 		$conf = new Config(__DIR__.'/../../etc/core/'.$configFilename.'.json');
-		return $conf->read();
+		
+		$files = $conf->read();
+
+		return $files;
 	}
 
 	/**
@@ -81,8 +97,27 @@ class Page extends ResponseContent {
 	 * @return string The generated page.
 	 */
 	public function generate() {
-		$templatePath = $this->_templatePath();
+		$content = $this->renderTemplate($this->_templatePath(), $this->vars);
 
+		$layoutPath = Pathfinder::getPathFor('tpl').'/'.$this->app->name().'/layout.html';
+
+		$layoutControllerClass = 'ctrl\\'.$this->app->name().'\\LayoutController';
+		if (class_exists($layoutControllerClass)) {
+			$layoutController = new $layoutControllerClass($this->app, $this);
+			$layoutController->execute($this->app->httpRequest());
+		}
+
+		$layoutVars = array_merge($this->vars, array('content' => $content));
+		return $this->renderTemplate($layoutPath, $layoutVars);
+	}
+
+	/**
+	 * Render a template.
+	 * @param  string $templatePath The template's path.
+	 * @param  array  $vars         Variables to provide to the template.
+	 * @return string               The output.
+	 */
+	public function renderTemplate($templatePath, array $vars = array()) {
 		if (!file_exists($templatePath)) {
 			throw new \RuntimeException('"'.$templatePath.'" : template doesn\'t exist');
 		}
@@ -92,40 +127,37 @@ class Page extends ResponseContent {
 			throw new \RuntimeException('Cannot read template "'.$templatePath.'"');
 		}
 
-		$layoutPath = __DIR__.'/../../tpl/'.$this->app->name().'/layout.html';
-		$layoutTpl = file_get_contents($layoutPath);
-		if ($layoutTpl === false) {
-			throw new \RuntimeException('Cannot read template "'.$layoutPath.'"');
-		}
-
-		$layoutControllerClass = 'ctrl\\'.$this->app->name().'\\LayoutController';
-		if (class_exists($layoutControllerClass)) {
-			$layoutController = new $layoutControllerClass($this->app, $this);
-			$layoutController->execute($this->app->httpRequest());
-		}
-
 		$globalVars = $this->globalVars();
 
 		$contentLoader = new Mustache_Loader_FilesystemLoader(dirname($templatePath), array('extension' => '.html'));
-		$layoutLoader = new Mustache_Loader_FilesystemLoader(dirname($layoutPath), array('extension' => '.html'));
 
 		$engine = $this->_templatesEngine();
 
-		$contentVars = array_merge($this->vars, $globalVars);
+		$contentVars = array_merge($vars, $globalVars);
 		$engine->setPartialsLoader($contentLoader);
-		$content = $engine->render($contentTpl, $contentVars);
+		return $engine->render($contentTpl, $contentVars);
+	}
 
-		$layoutVars = array_merge($this->vars, array('content' => $content), $globalVars);
-		$engine->setPartialsLoader($layoutLoader);
-		return $engine->render($layoutTpl, $layoutVars);
+	/**
+	 * Render a partial.
+	 * @param  string $partialName The partial name.
+	 * @param  array  $vars        Variables to provide to the template.
+	 * @return string              The output.
+	 */
+	public function renderPartial($partialName, array $vars = array()) {
+		return $this->renderTemplate($this->_templatePath('partials/'.$partialName), $vars);
 	}
 
 	/**
 	 * Get this page's template path.
 	 * @return string The template path.
 	 */
-	protected function _templatePath() {
-		return __DIR__.'/../../tpl/'.$this->app->name().'/'.$this->module.'/'.$this->action.'.html';
+	protected function _templatePath($index = null) {
+		if (empty($index)) {
+			$index = $this->action;
+		}
+
+		return Pathfinder::getPathFor('tpl').'/'.$this->app->name().'/'.$this->module.'/'.$index.'.html';
 	}
 
 	/**
@@ -193,41 +225,64 @@ class Page extends ResponseContent {
 
 			$filesBaseDir = $type;
 			$relativePublicFilesDir = __DIR__.'/../../public/';
-
-			if (!is_dir($relativePublicFilesDir.'/'.$filesBaseDir)) {
-				return '';
-			}
+			$hasPublicFilesDir = is_dir($relativePublicFilesDir.'/'.$filesBaseDir);
 
 			//Core files
 			$coreFilesPath = $filesBaseDir.'/core';
 			if (isset($coreLinkedFiles[$type])) {
 				foreach($coreLinkedFiles[$type] as $scriptData) {
-					$filePath = $coreFilesPath.'/'.$scriptData['filename'];
+					if (is_string($scriptData)) {
+						$scriptData = array('filename' => $scriptData);
+					}
+
+					if (!empty($scriptData['app'])) {
+						if (!is_array($scriptData['app'])) {
+							$scriptData['app'] = array($scriptData['app']);
+						}
+
+						if (!in_array($appName, $scriptData['app'])) {
+							continue;
+						}
+					}
+
+					if (substr($scriptData['filename'], 0, 2) == '//') { //URL
+						$filePath = $scriptData['filename'];
+					} elseif (substr($scriptData['filename'], 0, 1) == '/') { //Absolute path
+						$filePath = substr($scriptData['filename'], 1);
+					} elseif ($hasPublicFilesDir) { //Relative path
+						$filePath = $coreFilesPath.'/'.$scriptData['filename'];
+					}
 
 					$linkedFiles[] = $filePath;
 				}
 			}
 
-			//Module file
-			$moduleFilePath = $filesBaseDir.'/app/'.$appName.'/'.$module.'.'.$type;
-			if (file_exists($relativePublicFilesDir.'/'.$moduleFilePath)) {
-				$linkedFiles[] = $moduleFilePath;
-			}
+			if ($hasPublicFilesDir) {
+				//Module file
+				$moduleFilePath = $filesBaseDir.'/app/'.$appName.'/'.$module.'.'.$type;
+				if (file_exists($relativePublicFilesDir.'/'.$moduleFilePath)) {
+					$linkedFiles[] = $moduleFilePath;
+				}
 
-			//Action file
-			$actionFilePath = $filesBaseDir.'/app/'.$appName.'/'.$module.'/'.$action.'.'.$type;
-			if (file_exists($relativePublicFilesDir.'/'.$actionFilePath)) {
-				$linkedFiles[] = $actionFilePath;
+				//Action file
+				$actionFilePath = $filesBaseDir.'/app/'.$appName.'/'.$module.'/'.$action.'.'.$type;
+				if (file_exists($relativePublicFilesDir.'/'.$actionFilePath)) {
+					$linkedFiles[] = $actionFilePath;
+				}
 			}
 
 			$linkedFilesTags = '';
 			foreach($linkedFiles as $filePath) {
+				if (substr($filePath, 0, 2) != '//') { //URL
+					$filePath = '{{WEBSITE_ROOT}}/'.$filePath;
+				}
+
 				switch($type) {
 					case 'js':
-						$tag = '<script type="text/javascript" src="{{WEBSITE_ROOT}}/'.$filePath.'"></script>';
+						$tag = '<script type="text/javascript" src="'.$filePath.'"></script>';
 						break;
 					case 'css':
-						$tag = '<link href="{{WEBSITE_ROOT}}/'.$filePath.'" rel="stylesheet" media="screen" />';
+						$tag = '<link href="'.$filePath.'" rel="stylesheet" media="screen" />';
 						break;
 					default:
 						$tag = '';
@@ -237,7 +292,7 @@ class Page extends ResponseContent {
 			}
 
 			if ($type == 'js') {
-				$linkedFilesTags .= '<script type="text/javascript">Lighp.websiteConf = '.json_encode($globalVars).';Lighp.setVars('.json_encode($pageVars).');</script>';
+				$linkedFilesTags .= '<script type="text/javascript">Lighp.setWebsiteConf('.json_encode($globalVars).');Lighp.setVars('.json_encode($pageVars).');</script>';
 			}
 
 			return $linkedFilesTags;
@@ -258,16 +313,29 @@ class Page extends ResponseContent {
 				$text = $helper->render($text);
 			}
 
-			return $text;
+			return strtotime($text);
 		});
-		$mustache->addHelper('date', function($text, $helper = null) {
-			if (!empty($helper)) {
-				$text = $helper->render($text);
-			}
 
-			return $text;
+		$dateTimeFormat = function($date, $helper, $format) {
+			if ($date instanceof \DateTime) {
+				return $date->format($format);
+			} else if (is_int($date)) {
+				if (!empty($helper)) {
+					$time = $helper->render($date);
+				}
+
+				return date($format, (int) $date);
+			} else {
+				return $date;
+			}
+		};
+		$mustache->addHelper('date', function($date, $helper = null) use($dateTimeFormat) {
+			return $dateTimeFormat($date, $helper, 'Y-m-d');
 		});
-		
+		$mustache->addHelper('datetime', function($date, $helper = null) use($dateTimeFormat) {
+			return $dateTimeFormat($date, $helper, 'Y-m-d H:i:s');
+		});
+
 
 		//File size
 		$mustache->addHelper('filesize', function($value) {
@@ -284,6 +352,41 @@ class Page extends ResponseContent {
 			}
 
 			return (($bytes < 0) ? '-' : '') . $roundedBytes . ' ' . $suffixes[floor($base)];
+		});
+
+		//join
+		$mustache->addHelper('join', function($value) {
+			if (!is_array($value)) {
+				return $value;
+			}
+
+			return implode(', ', $value);
+		});
+
+		//price
+		$mustache->addHelper('price', function($price) {
+			$price = (float) $price;
+
+			return number_format($price, 2, ',', ' ');
+		});
+
+		//debug
+		$mustache->addHelper('var_dump', function($value) {
+			if (!is_array($value)) {
+				return $value;
+			}
+
+			ob_start();
+			var_dump($value);
+			$out = ob_get_contents();
+			ob_end_clean();
+
+			return $out;
+		});
+
+		//strip_tags
+		$mustache->addHelper('strip_tags', function($value) {
+			return strip_tags($value);
 		});
 
 		return $mustache;
