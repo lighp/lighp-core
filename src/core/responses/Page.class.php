@@ -97,6 +97,8 @@ class Page extends ResponseContent {
 	 * @return string The generated page.
 	 */
 	public function generate() {
+		$templatePath = $this->_templatePath();
+
 		$content = $this->renderTemplate($this->_templatePath(), $this->vars);
 
 		$layoutPath = Pathfinder::getPathFor('tpl').'/'.$this->app->name().'/layout.html';
@@ -139,25 +141,11 @@ class Page extends ResponseContent {
 	}
 
 	/**
-	 * Render a partial.
-	 * @param  string $partialName The partial name.
-	 * @param  array  $vars        Variables to provide to the template.
-	 * @return string              The output.
-	 */
-	public function renderPartial($partialName, array $vars = array()) {
-		return $this->renderTemplate($this->_templatePath('partials/'.$partialName), $vars);
-	}
-
-	/**
 	 * Get this page's template path.
 	 * @return string The template path.
 	 */
-	protected function _templatePath($index = null) {
-		if (empty($index)) {
-			$index = $this->action;
-		}
-
-		return Pathfinder::getPathFor('tpl').'/'.$this->app->name().'/'.$this->module.'/'.$index.'.html';
+	protected function _templatePath() {
+		return Pathfinder::getPathFor('tpl').'/'.$this->app->name().'/'.$this->module.'/'.$this->action.'.html';
 	}
 
 	/**
@@ -315,25 +303,14 @@ class Page extends ResponseContent {
 
 			return strtotime($text);
 		});
-
-		$dateTimeFormat = function($date, $helper, $format) {
-			if ($date instanceof \DateTime) {
-				return $date->format($format);
-			} else if (is_int($date)) {
-				if (!empty($helper)) {
-					$time = $helper->render($date);
-				}
-
-				return date($format, (int) $date);
-			} else {
-				return $date;
+		$mustache->addHelper('date', function($time, $helper = null) {
+			if (!empty($helper)) {
+				$time = $helper->render($time);
 			}
-		};
-		$mustache->addHelper('date', function($date, $helper = null) use($dateTimeFormat) {
-			return $dateTimeFormat($date, $helper, 'Y-m-d');
-		});
-		$mustache->addHelper('datetime', function($date, $helper = null) use($dateTimeFormat) {
-			return $dateTimeFormat($date, $helper, 'Y-m-d H:i:s');
+
+			$time = (int) $time;
+
+			return date('Y-m-d H:i:s', $time);
 		});
 
 
@@ -363,13 +340,6 @@ class Page extends ResponseContent {
 			return implode(', ', $value);
 		});
 
-		//price
-		$mustache->addHelper('price', function($price) {
-			$price = (float) $price;
-
-			return number_format($price, 2, ',', ' ');
-		});
-
 		//debug
 		$mustache->addHelper('var_dump', function($value) {
 			if (!is_array($value)) {
@@ -382,11 +352,6 @@ class Page extends ResponseContent {
 			ob_end_clean();
 
 			return $out;
-		});
-
-		//strip_tags
-		$mustache->addHelper('strip_tags', function($value) {
-			return strip_tags($value);
 		});
 
 		return $mustache;
