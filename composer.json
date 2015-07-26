@@ -15,6 +15,7 @@
 		"lighp/composer-lighp-installers": "dev-master",
 		"mustache/mustache": "dev-master",
 		"mustangostang/spyc": "0.5.*@dev",
-		"ircmaxell/password-compat": "dev-master"
+		"ircmaxell/password-compat": "dev-master",
+		"lighp/module-users": "dev-master"
 	}
 }
