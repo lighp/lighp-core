@@ -16,6 +16,7 @@
 		"mustache/mustache": "dev-master",
 		"mustangostang/spyc": "0.5.*@dev",
 		"ircmaxell/password-compat": "dev-master",
-		"lighp/module-users": "dev-master"
+		"lighp/module-users": "dev-master",
+		"lighp/module-api-base": "dev-master"
 	}
 }
