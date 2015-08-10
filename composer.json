@@ -12,6 +12,7 @@
 		}
 	],
 	"require": {
+		"php": ">=5.4.0",
 		"lighp/composer-lighp-installers": "dev-master",
 		"mustache/mustache": "dev-master",
 		"mustangostang/spyc": "0.5.*@dev",
