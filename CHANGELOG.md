@@ -1,4 +1,4 @@
-2013-04-17  Simon Ser  <contact@emersion.fr>
+2013-04-17 emersion <contact@emersion.fr>
 
 * Composer is now used for PHP dependencies
 * Administration pages have been improved
